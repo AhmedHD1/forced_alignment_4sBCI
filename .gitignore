@@ -1,0 +1,27 @@
+# ---- Large data files (not tracked) ----
+data/processed/patient_data.pkl
+data/raw/
+
+# ---- Python ----
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.Python
+
+# ---- Jupyter ----
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- IDE ----
+.vscode/
+.idea/
+
+# ---- Figures (generated — optionally untrack) ----
+# figures/
