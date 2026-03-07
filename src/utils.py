@@ -64,7 +64,13 @@ PHONEME_COLOR_MAP = {
     'v'  : 'rgba(156,120,197,1.0)'
 }
 
-
+def get_time(approx_time):
+    # convert time seconds to mns+seconds
+    val = approx_time/60
+    rem = val - int(val)
+    return f"{int(val)} mns and {rem * 60} seconds"
+    # get_time(639)
+    
 def export_waveform_with_zoom(wav_path, t_start, t_end,
                               zoom_t_start, zoom_t_end,
                               outfile="waveform.svg"):
@@ -570,7 +576,7 @@ def get_training_data(patient_data, patient_name, position, method):
 
 def run_tsne(Xys_df, perp, pcacomp, numrun, pca_ref=None, random_state=0):
 
-    tsne_model = TSNE(n_components=2, init='pca', perplexity=perp, random_state=numrun, n_jobs=-1)
+    tsne_model = TSNE(n_components=2, init='pca', perplexity=perp, n_jobs=-1, random_state=numrun)
 
     X_train = np.stack(Xys_df['X_train'].values)
     y_train = Xys_df['y_train_num'].to_numpy()
@@ -615,7 +621,7 @@ def run_tsne(Xys_df, perp, pcacomp, numrun, pca_ref=None, random_state=0):
 
 
 def run_tsneShuffledY(Xys_df, perp, pcacomp, numrun):
-    tsne_model = TSNE(n_components=2, init='pca', random_state=numrun, perplexity=perp, n_jobs=-1)
+    tsne_model = TSNE(n_components=2, init='pca', perplexity=perp, n_jobs=-1, random_state=numrun)
     pca_model = PCA_noCenter(n_components=pcacomp)
 
     X_train = np.stack(Xys_df['X_train'].values)
@@ -744,3 +750,82 @@ def run_plottly(tsne_df, huere):
 
 
     return fig
+
+
+
+def fetch_silscore_data(patient_data,
+                        pkl_path=r"../data/processed/silscores_allPatients.pkl",
+                        patients=None,
+                        methods=None,
+                        position="p1",
+                        perp_default=50,
+                        new_run= True):
+
+    if patients is None:
+        patients = ['S26', 'S22', 'S23', 'S33']
+
+    if methods is None:
+        methods = ['Kumar', 'MFA']
+
+    if os.path.exists(pkl_path) and not new_run:
+        with open(pkl_path, "rb") as f:
+            silscores = pickle.load(f)
+        return silscores
+
+    silscores = {}
+
+    for patient in patients:
+        silscores[patient] = {}
+
+        for method in methods:
+            silscores[patient][method] = {
+                'Silhoutte_Score_PhonType': [],
+                'Silhoutte_Score_PhonGrp': [],
+                'Silhoutte_Score_Phon': [],
+                'Silhouette_Score_PhonChance': []
+            }
+
+            Xys_df = get_training_data(patient_data, patient, position, method)
+
+            perp = 30 if patient == 'S33' else perp_default
+
+            for i in range(1, 51):
+                tsne_df = run_tsneShuffledY(Xys_df, perp, 0.8, i)
+
+                silscores[patient][method]['Silhoutte_Score_PhonType'].append(
+                    tsne_df['Silhoutte_Score_PhonType'].iloc[0]
+                )
+                silscores[patient][method]['Silhoutte_Score_PhonGrp'].append(
+                    tsne_df['Silhoutte_Score_PhonGrp'].iloc[0]
+                )
+                silscores[patient][method]['Silhoutte_Score_Phon'].append(
+                    tsne_df['Silhoutte_Score_Phon'].iloc[0]
+                )
+                silscores[patient][method]['Silhouette_Score_PhonChance'].append(
+                    tsne_df['Silhouette_Score_PhonChance'].iloc[0]
+                )
+
+    with open(pkl_path, "wb") as f:
+        pickle.dump(silscores, f)
+
+    print("Saved silscores to pickle.")
+    return silscores
+
+
+def mask_phoneme_channel(X, y, phoneme, channel):
+    # keep the indexing of the trials, we need that 
+    mask = (y == phoneme)
+    # get the indices of the trials where phoneme matches
+    indices = np.where(mask)[0]
+    if channel == "all":
+        X = X[mask, :, :]
+    else:
+        X = X[mask, channel, :]
+    y = y[mask]
+    return X, y, indices
+
+
+def rgb_string_to_rgba(rgb_string, alpha):
+    nums = rgb_string.strip('rgb()').split(',')
+    r, g, b = [int(n) for n in nums]
+    return f'rgba({r}, {g}, {b}, {alpha})'
