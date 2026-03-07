@@ -6,7 +6,7 @@
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
    <cc:Work>
     <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
-    <dc:date>2026-03-03T08:47:21.275225</dc:date>
+    <dc:date>2026-03-07T16:27:22.308060</dc:date>
     <dc:format>image/svg+xml</dc:format>
     <dc:creator>
      <cc:Agent>
@@ -13803,12 +13803,12 @@ L 659.643575 97.663864
 L 659.656143 95.71334 
 L 659.769251 99.614388 
 L 659.781818 99.231932 
-" clip-path="url(#p26b3544351)" style="fill: none; stroke: #000000; stroke-width: 0.5; stroke-linecap: square"/>
+" clip-path="url(#p7d82b54af3)" style="fill: none; stroke: #000000; stroke-width: 0.5; stroke-linecap: square"/>
    </g>
    <g id="line2d_2">
     <path d="M 345.6 201.6 
 L 345.6 0 
-" clip-path="url(#p26b3544351)" style="fill: none; stroke: #000000; stroke-width: 0.5; stroke-linecap: square"/>
+" clip-path="url(#p7d82b54af3)" style="fill: none; stroke: #000000; stroke-width: 0.5; stroke-linecap: square"/>
    </g>
   </g>
   <g id="axes_2">
@@ -23305,20 +23305,20 @@ L 659.687559 349.826681
 L 659.718979 351.394749 
 L 659.750398 349.40598 
 L 659.781818 350.209136 
-" clip-path="url(#p135f21f25b)" style="fill: none; stroke: #000000; stroke-width: 0.5; stroke-linecap: square"/>
+" clip-path="url(#p923d0df183)" style="fill: none; stroke: #000000; stroke-width: 0.5; stroke-linecap: square"/>
    </g>
    <g id="line2d_4">
     <path d="M 345.6 259.2 
 L 345.6 460.8 
-" clip-path="url(#p135f21f25b)" style="fill: none; stroke: #000000; stroke-width: 0.5; stroke-linecap: square"/>
+" clip-path="url(#p923d0df183)" style="fill: none; stroke: #000000; stroke-width: 0.5; stroke-linecap: square"/>
    </g>
   </g>
  </g>
  <defs>
-  <clipPath id="p26b3544351">
+  <clipPath id="p7d82b54af3">
    <rect x="0" y="0" width="691.2" height="201.6"/>
   </clipPath>
-  <clipPath id="p135f21f25b">
+  <clipPath id="p923d0df183">
    <rect x="0" y="259.2" width="691.2" height="201.6"/>
   </clipPath>
  </defs>

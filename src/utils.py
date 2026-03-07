@@ -1,3 +1,7 @@
+
+import sys, os
+os.environ['MKL_THREADING_LAYER'] = 'GNU'
+
 import numpy as np
 import plotly.io as pio
 
@@ -8,7 +12,6 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import sklearn
-import os
 from matplotlib import cm as colours
 from colorama import Fore, Back, Style
 from scipy.stats import sem
@@ -829,3 +832,58 @@ def rgb_string_to_rgba(rgb_string, alpha):
     nums = rgb_string.strip('rgb()').split(',')
     r, g, b = [int(n) for n in nums]
     return f'rgba({r}, {g}, {b}, {alpha})'
+
+
+def silscores_to_df(silscores):
+    rows = []
+    for patient, methods in silscores.items():
+        for method, scores in methods.items():
+            for score_type, values in scores.items():
+                for iteration, value in enumerate(values, start=1):
+                    rows.append({
+                        'Patient':    patient,
+                        'Method':     method,
+                        'Score_Type': score_type,
+                        'Iteration':  iteration,
+                        'Value':      value,
+                    })
+    silscores_df = pd.DataFrame(rows)
+    silscores_df = silscores_df[["Patient", "Method", "Score_Type", "Iteration", "Value"]]
+    silscores_df.sort_values(by=["Patient", "Method", "Score_Type", "Iteration"], inplace=True)
+    return silscores_df
+
+
+
+
+
+
+
+
+# import numpy as np
+# import plotly.io as pio
+
+# import scipy as sp
+# import matplotlib.pyplot as plt
+# import seaborn as sns
+# import pandas as pd
+# import plotly.express as px
+# import plotly.graph_objects as go
+# import sklearn 
+# import os
+# from matplotlib import cm as colours 
+# from colorama import Fore, Back, Style
+# from scipy.stats import sem
+# #import joblib
+# #import umap.umap_ as umap
+# from sklearn.manifold import trustworthiness
+# from sklearn.metrics import silhouette_samples
+# from sklearn.manifold import TSNE
+# from sklearn.decomposition import PCA
+# from sklearn.base import BaseEstimator, TransformerMixin
+# from plotly.subplots import make_subplots
+# import pickle 
+# from scipy.stats import mannwhitneyu
+# from scipy.stats import ttest_ind
+# from scipy.stats import ttest_rel
+# from scipy.stats import wilcoxon
+# from sklearn.utils import shuffle
