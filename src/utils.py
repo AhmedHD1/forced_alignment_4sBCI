@@ -577,9 +577,9 @@ def get_training_data(patient_data, patient_name, position, method):
     return Xys_df
 
 
-def run_tsne(Xys_df, perp, pcacomp, numrun, pca_ref=None, random_state=0):
+def run_tsne(Xys_df, perp, pcacomp, numrun, pca_ref=None):
 
-    tsne_model = TSNE(n_components=2, init='pca', perplexity=perp, n_jobs=-1, random_state=numrun)
+    tsne_model = TSNE(n_components=2, init='random', perplexity=perp, n_jobs=-1, random_state=numrun)
 
     X_train = np.stack(Xys_df['X_train'].values)
     y_train = Xys_df['y_train_num'].to_numpy()
@@ -624,7 +624,7 @@ def run_tsne(Xys_df, perp, pcacomp, numrun, pca_ref=None, random_state=0):
 
 
 def run_tsneShuffledY(Xys_df, perp, pcacomp, numrun):
-    tsne_model = TSNE(n_components=2, init='pca', perplexity=perp, n_jobs=-1, random_state=numrun)
+    tsne_model = TSNE(n_components=2, init='random', perplexity=perp, n_jobs=-1, random_state=numrun)
     pca_model = PCA_noCenter(n_components=pcacomp)
 
     X_train = np.stack(Xys_df['X_train'].values)
@@ -762,7 +762,8 @@ def fetch_silscore_data(patient_data,
                         methods=None,
                         position="p1",
                         perp_default=50,
-                        new_run= True):
+                        new_run= True, 
+                        num_iters=50):
 
     if patients is None:
         patients = ['S26', 'S22', 'S23', 'S33']
@@ -792,7 +793,7 @@ def fetch_silscore_data(patient_data,
 
             perp = 30 if patient == 'S33' else perp_default
 
-            for i in range(1, 51):
+            for i in range(1, num_iters + 1):
                 tsne_df = run_tsneShuffledY(Xys_df, perp, 0.8, i)
 
                 silscores[patient][method]['Silhoutte_Score_PhonType'].append(
@@ -857,33 +858,3 @@ def silscores_to_df(silscores):
 
 
 
-
-
-# import numpy as np
-# import plotly.io as pio
-
-# import scipy as sp
-# import matplotlib.pyplot as plt
-# import seaborn as sns
-# import pandas as pd
-# import plotly.express as px
-# import plotly.graph_objects as go
-# import sklearn 
-# import os
-# from matplotlib import cm as colours 
-# from colorama import Fore, Back, Style
-# from scipy.stats import sem
-# #import joblib
-# #import umap.umap_ as umap
-# from sklearn.manifold import trustworthiness
-# from sklearn.metrics import silhouette_samples
-# from sklearn.manifold import TSNE
-# from sklearn.decomposition import PCA
-# from sklearn.base import BaseEstimator, TransformerMixin
-# from plotly.subplots import make_subplots
-# import pickle 
-# from scipy.stats import mannwhitneyu
-# from scipy.stats import ttest_ind
-# from scipy.stats import ttest_rel
-# from scipy.stats import wilcoxon
-# from sklearn.utils import shuffle
