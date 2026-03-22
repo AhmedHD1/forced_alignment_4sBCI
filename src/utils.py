@@ -1,6 +1,10 @@
 
 import sys, os
+import re
+import io
 os.environ['MKL_THREADING_LAYER'] = 'GNU'
+
+from src.config import PANEL_DIMS, PLOT_STYLE
 
 import numpy as np
 import plotly.io as pio
@@ -32,6 +36,149 @@ from sklearn.utils import shuffle
 
 import librosa
 import librosa.display
+
+
+def save_svg(fig, path, width_mm, height_mm, dpi=96):
+    """Save a Plotly figure as SVG with exact physical dimensions in mm."""
+    px_w = round(width_mm * dpi / 25.4)
+    px_h = round(height_mm * dpi / 25.4)
+    svg = fig.to_image(format="svg", width=px_w, height=px_h).decode("utf-8")
+    svg = svg.replace(f'width="{px_w}"', f'width="{width_mm}mm"')
+    svg = svg.replace(f'height="{px_h}"', f'height="{height_mm}mm"')
+    with open(path, "w") as f:
+        f.write(svg)
+
+
+def save_mpl_svg(fig, path, width_mm, height_mm):
+    """Save a matplotlib figure as SVG with approximate physical dimensions in mm."""
+    fig.set_size_inches(width_mm / 25.4, height_mm / 25.4)
+    fig.savefig(path, format="svg", bbox_inches="tight", pad_inches=0)
+
+
+def _prefix_svg_ids(svg_str, prefix):
+    """Prefix all IDs and their url(#)/href references to prevent clashes when stitching SVGs."""
+    ids = re.findall(r'\bid="([^"]+)"', svg_str)
+    # process longest IDs first so shorter substrings don't get double-replaced
+    for id_val in sorted(ids, key=len, reverse=True):
+        new_id = f"{prefix}_{id_val}"
+        svg_str = svg_str.replace(f'id="{id_val}"',            f'id="{new_id}"')
+        svg_str = svg_str.replace(f'url(#{id_val})',           f'url(#{new_id})')
+        svg_str = svg_str.replace(f'href="#{id_val}"',         f'href="#{new_id}"')
+        svg_str = svg_str.replace(f'xlink:href="#{id_val}"',   f'xlink:href="#{new_id}"')
+    return svg_str
+
+
+def make_placeholder_fig(width_mm, height_mm, text="[Placeholder]"):
+    """Return a blank Plotly figure suitable as a panel placeholder in save_full_figure_svg."""
+    fig = go.Figure()
+    fig.add_annotation(
+        text=text, x=0.5, y=0.5, xref="paper", yref="paper",
+        showarrow=False, font=dict(size=10, color="lightgray"),
+        bordercolor="lightgray", borderwidth=1
+    )
+    fig.update_layout(
+        plot_bgcolor="white", paper_bgcolor="white",
+        xaxis=dict(visible=False), yaxis=dict(visible=False),
+        margin=dict(l=5, r=5, t=5, b=5)
+    )
+    return fig
+
+
+def save_full_figure_svg(panels, nrows, ncols, out_path, gap_mm=3, dpi=96):
+    """Compose multiple Plotly figures into one publication-ready SVG.
+
+    Parameters
+    ----------
+    panels : list of (fig, width_mm, height_mm) or None
+        Panel specs in row-major order (left→right, top→bottom).
+        Pass None to leave a cell blank.
+    nrows, ncols : int
+        Grid dimensions.
+    out_path : str
+        Destination SVG file path.
+    gap_mm : float
+        Gap between panels in mm.
+    dpi : float
+        Rendering resolution used for the px ↔ mm conversion.
+    """
+    gap_px = round(gap_mm * dpi / 25.4)
+
+    # --- render each panel to an SVG string ---
+    rendered = []
+    for i, item in enumerate(panels):
+        if item is None:
+            rendered.append(None)
+            continue
+        fig, w_mm, h_mm = item
+        px_w = round(w_mm * dpi / 25.4)
+        px_h = round(h_mm * dpi / 25.4)
+
+        if isinstance(fig, str):
+            # SVG file path
+            with open(fig, 'r', encoding='utf-8') as f:
+                svg_str = f.read()
+        elif hasattr(fig, 'savefig'):
+            # Matplotlib figure
+            fig.set_size_inches(w_mm / 25.4, h_mm / 25.4)
+            buf = io.StringIO()
+            fig.savefig(buf, format='svg', dpi=dpi, bbox_inches='tight')
+            svg_str = buf.getvalue()
+        else:
+            # Plotly figure
+            svg_str = fig.to_image(format="svg", width=px_w, height=px_h).decode("utf-8")
+
+        svg_str = svg_str[svg_str.find('<svg'):]        # strip XML declaration
+        svg_str = _prefix_svg_ids(svg_str, f"p{i}")    # avoid ID clashes across panels
+        rendered.append((svg_str, px_w, px_h))
+
+    # --- compute grid geometry ---
+    col_widths  = [0] * ncols
+    row_heights = [0] * nrows
+    for r in range(nrows):
+        for c in range(ncols):
+            idx = r * ncols + c
+            if idx < len(rendered) and rendered[idx] is not None:
+                _, px_w, px_h = rendered[idx]
+                col_widths[c]  = max(col_widths[c],  px_w)
+                row_heights[r] = max(row_heights[r], px_h)
+
+    total_w_px = sum(col_widths)  + gap_px * max(ncols - 1, 0)
+    total_h_px = sum(row_heights) + gap_px * max(nrows - 1, 0)
+    total_w_mm = total_w_px * 25.4 / dpi
+    total_h_mm = total_h_px * 25.4 / dpi
+
+    # --- stitch into a composite SVG using nested <svg> viewports ---
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'xmlns:xlink="http://www.w3.org/1999/xlink" '
+        f'width="{total_w_mm:.3f}mm" height="{total_h_mm:.3f}mm" '
+        f'viewBox="0 0 {total_w_px} {total_h_px}">'
+    ]
+
+    y_off = 0
+    for r in range(nrows):
+        x_off = 0
+        for c in range(ncols):
+            idx = r * ncols + c
+            if idx < len(rendered) and rendered[idx] is not None:
+                svg_str, px_w, px_h = rendered[idx]
+                vb_m   = re.search(r'viewBox="([^"]*)"', svg_str)
+                vb     = vb_m.group(1) if vb_m else f"0 0 {px_w} {px_h}"
+                open_m = re.search(r'<svg[^>]*>', svg_str)
+                inner  = svg_str[open_m.end() : svg_str.rindex('</svg>')]
+                parts.append(
+                    f'<svg x="{x_off}" y="{y_off}" '
+                    f'width="{px_w}" height="{px_h}" viewBox="{vb}">'
+                )
+                parts.append(inner)
+                parts.append('</svg>')
+            x_off += col_widths[c] + gap_px
+        y_off += row_heights[r] + gap_px
+
+    parts.append('</svg>')
+
+    with open(out_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(parts))
 
 
 numtoPhon = {1:'a', 2:'ae', 3:'i', 4:'u', 5:'b', 6:'p', 7:'v', 8:'g', 9:'k'}
@@ -67,16 +214,18 @@ PHONEME_COLOR_MAP = {
     'v'  : 'rgba(156,120,197,1.0)'
 }
 
-def get_time(approx_time):
+def format_seconds(approx_time):
     # convert time seconds to mns+seconds
     val = approx_time/60
     rem = val - int(val)
     return f"{int(val)} mns and {rem * 60} seconds"
-    # get_time(639)
+    # format_seconds(639)
     
 def export_waveform_with_zoom(wav_path, t_start, t_end,
                               zoom_t_start, zoom_t_end,
-                              outfile="waveform.svg"):
+                              outfile="waveform.svg",
+                              width_mm=PANEL_DIMS["figure1"]["audio"]["width_mm"],
+                              height_mm=PANEL_DIMS["figure1"]["audio"]["height_mm"]):
     y, sr = librosa.load(wav_path, sr=None)
 
     # main segment
@@ -87,7 +236,7 @@ def export_waveform_with_zoom(wav_path, t_start, t_end,
     z = y[int(zoom_t_start * sr): int(zoom_t_end * sr)]
     t_z = np.linspace(zoom_t_start, zoom_t_end, len(z))
 
-    fig = plt.figure(figsize=(12, 8), dpi=600)
+    fig = plt.figure(figsize=(width_mm / 25.4, height_mm / 25.4))
 
     # main panel
     ax_main = fig.add_axes([0.1, 0.55, 0.8, 0.35])
@@ -104,12 +253,14 @@ def export_waveform_with_zoom(wav_path, t_start, t_end,
     ax_main.plot([x, x], [0, 1], color="black", linewidth=0.5, transform=ax_main.transAxes)
     ax_zoom.plot([x, x], [1, 0], color="black", linewidth=0.5, transform=ax_zoom.transAxes)
 
-    fig.savefig(outfile, format="svg", dpi=600, bbox_inches="tight", pad_inches=0)
+    save_mpl_svg(fig, outfile, width_mm, height_mm)
     return fig
 
 def export_spectrogram_with_zoom(wav_path, t_start, t_end,
                                  zoom_t_start, zoom_t_end,
-                                 outfile="spectrogram.svg"):
+                                 outfile="spectrogram.svg",
+                                 width_mm=PANEL_DIMS["figure1"]["audio"]["width_mm"],
+                                 height_mm=PANEL_DIMS["figure1"]["audio"]["height_mm"]):
     y, sr = librosa.load(wav_path, sr=None)
 
     # main segment spectrogram
@@ -136,7 +287,7 @@ def export_spectrogram_with_zoom(wav_path, t_start, t_end,
     )
     S_z_db = librosa.power_to_db(S_z, ref=np.max)
 
-    fig = plt.figure(figsize=(12, 8), dpi=600)
+    fig = plt.figure(figsize=(width_mm / 25.4, height_mm / 25.4))
 
     ax_main = fig.add_axes([0.1, 0.55, 0.8, 0.35])
     librosa.display.specshow(S_db, sr=sr, hop_length=256, cmap="magma", ax=ax_main)
@@ -151,10 +302,12 @@ def export_spectrogram_with_zoom(wav_path, t_start, t_end,
     ax_main.plot([x, x], [0, 1], color="black", linewidth=0.5, transform=ax_main.transAxes)
     ax_zoom.plot([x, x], [1, 0], color="black", linewidth=0.5, transform=ax_zoom.transAxes)
 
-    fig.savefig(outfile, format="svg", dpi=600, bbox_inches="tight", pad_inches=0)
+    save_mpl_svg(fig, outfile, width_mm, height_mm)
     return fig
 
-def export_spectrogram(wav_path, t_start, t_end, outfile="spectrogram.svg"):
+def export_spectrogram(wav_path, t_start, t_end, outfile="spectrogram.svg",
+                       width_mm=PANEL_DIMS["figure1"]["audio"]["width_mm"],
+                       height_mm=PANEL_DIMS["figure1"]["audio"]["height_mm"]):
     y, sr = librosa.load(wav_path, sr=None)
     segment = y[int(t_start * sr): int(t_end * sr)]
 
@@ -165,14 +318,14 @@ def export_spectrogram(wav_path, t_start, t_end, outfile="spectrogram.svg"):
     )
     S_db = librosa.power_to_db(S, ref=np.max)
 
-    plt.figure(figsize=(12, 5), dpi=600)
+    fig = plt.figure(figsize=(width_mm / 25.4, height_mm / 25.4))
     librosa.display.specshow(S_db, sr=sr, hop_length=256, cmap="magma")
     plt.axis("off")
 
-    plt.savefig(outfile, format="svg", dpi=600, bbox_inches="tight", pad_inches=0)
+    save_mpl_svg(fig, outfile, width_mm, height_mm)
     plt.show()
     plt.close()
-    return 
+    return
 
 
 
@@ -232,60 +385,106 @@ orderforplot = {
 }
 
 
-def make_phoneme_colormap(_):
+def get_phoneme_colormap(_):
     return PHONEME_COLOR_MAP
 
 
 
 
-def plotly_general(df, y, width, height, name, colorer=None, x=None, facet_col=None, jitter=0.4, boxgroupgap=0.8, boxgap=0.8, save=True):
+def plot_timing_boxplot(df, y, width_mm, height_mm, name, colorer=None, x=None, facet_col=None,
+                   jitter=None, boxgroupgap=None, boxgap=None, save=True):
+
+    _box  = PLOT_STYLE["box"]
+    _font = PLOT_STYLE["font"]
+
+    if jitter is None: jitter = _box["jitter"]
 
     if x is not None:
-        boxgroupgap=0.6
-    fig = px.box(df, y=y, x=x, facet_col=facet_col, color=colorer, points="all",
-                 boxmode="group",
-                 hover_name='Trial',
-                 hover_data=['ApproxTime','Time', 'Patient', 'Phoneme', 'Position', 'Vowel/Consonant','Articulatory Group'],
+        # Use go.Box with manual x offsets — the only reliable way to control
+        # within-group spacing between hued boxes.
+        colors_list = [c for c in orderforplot.get(colorer, []) if c in df[colorer].unique()]
+        x_list      = [v for v in orderforplot.get(x, [])       if v in df[x].unique()]
+        if not x_list:
+            x_list = sorted(df[x].unique())
 
-                 color_discrete_sequence=px.colors.qualitative.Plotly,
-                 category_orders=orderforplot)
+        gs        = _box["group_spacing"]
+        x_pos     = {v: i * gs for i, v in enumerate(x_list)}
+        n_c       = len(colors_list)
+        spacing   = _box["box_spacing"]
+        bw        = _box["box_width"]
+        color_seq = px.colors.qualitative.Plotly
 
-    fig.update_traces(marker=dict(size=1.6, opacity=0.4, line=dict(width=0.2, color="#d1cfcf")),
-                      jitter=jitter, boxmean=True, opacity=1.0)
+        fig = go.Figure()
+        for ci, cval in enumerate(colors_list):
+            sub    = df[df[colorer] == cval]
+            offset = (ci - (n_c - 1) / 2.0) * spacing
+            color  = color_seq[ci % len(color_seq)]
+            fig.add_trace(go.Box(
+                x=[x_pos[v] + offset for v in sub[x]],
+                y=sub[y].values,
+                name=cval,
+                width=bw,
+                marker_color=color,
+                line_color=color,
+                marker=dict(size=_box["marker_size"], opacity=_box["marker_opacity"],
+                            line=dict(width=_box["line_width"], color="white")),
+                line=dict(width=_box["line_width"]),
+                boxmean=_box["boxmean"],
+                jitter=jitter,
+                pointpos=_box["pointpos"],
+                boxpoints='all',
+            ))
 
-    fig.update_layout(title="Phoneme Time Differences: Manual vs. Automated",
-                      title_font=dict(size=7, family="Arial", color="black"),
-                      font=dict(family="Arial", size=6, color="black"),
-                      yaxis_title="Time (s)", plot_bgcolor="white", paper_bgcolor="white",
-                      boxgroupgap=boxgroupgap, boxgap=boxgap, margin=dict(t=40, b=40, l=50, r=10),
-                      legend=dict(title_text=None, font=dict(size=6)))
-    fig.update_layout(plot_bgcolor="white", paper_bgcolor="white", xaxis_showgrid=False, yaxis_showgrid=False)
+        fig.update_xaxes(tickvals=list(x_pos.values()), ticktext=list(x_pos.keys()))
+
+    else:
+        fig = px.box(df, y=y, x=x, facet_col=facet_col, color=colorer, points="all",
+                     boxmode="group",
+                     hover_name='Trial',
+                     hover_data=['ApproxTime','Time', 'Patient', 'Phoneme', 'Position', 'Vowel/Consonant','Articulatory Group'],
+                     color_discrete_sequence=px.colors.qualitative.Plotly,
+                     category_orders=orderforplot)
+
+        fig.update_traces(
+            marker=dict(size=_box["marker_size"], opacity=_box["marker_opacity"],
+                        line=dict(width=_box["line_width"], color="white")),
+            line=dict(width=_box["line_width"]),
+            jitter=jitter, pointpos=_box["pointpos"], boxmean=_box["boxmean"], opacity=1.0)
+
+        fig.update_layout(boxgroupgap=_box["boxgap_hue"], boxgap=_box["boxgap_hue"])
+
+    fig.update_layout(
+        title="Phoneme Time Differences: Manual vs. Automated",
+        title_font=dict(size=_font["size_title"], family=_font["family"], color="black"),
+        font=dict(family=_font["family"], size=_font["size_label"], color="black"),
+        yaxis_title="Time (s)", plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(t=40, b=40, l=50, r=10),
+        legend=dict(title_text=None, font=dict(size=_font["size_label"])),
+        xaxis_showgrid=False, yaxis_showgrid=False)
 
     fig.update_xaxes(showticklabels=True, showline=True, linecolor="black", mirror=False,
-                     ticks="outside", tickfont=dict(size=5, family="Arial"),
-                     title_font=dict(size=6, family="Arial"))
+                     ticks="outside", tickfont=dict(size=_font["size_tick"], family=_font["family"]),
+                     title_font=dict(size=_font["size_label"], family=_font["family"]))
     fig.update_yaxes(showticklabels=True, showline=True, linecolor="black", mirror=False,
-                     ticks="outside", tickfont=dict(size=5, family="Arial"),
-                     title_font=dict(size=6, family="Arial"))
+                     ticks="outside", tickfont=dict(size=_font["size_tick"], family=_font["family"]),
+                     title_font=dict(size=_font["size_label"], family=_font["family"]))
 
     if save:
-        fig.write_image(f"../figures/figure2/fig1_{name}.svg", 
-                    format="svg", scale=3)
-    fig.show()
-    return None
+        save_svg(fig, f"../figures/figure2/fig1_{name}.svg", width_mm, height_mm)
+    return fig
 
 
 # ================================================================
 # PLOTTING FUNCTION
 # ================================================================
 
-def plotly_phonemes(df, save=True):
+def plot_phoneme_boxplot(df, width_mm=PANEL_DIMS["figure2"]["by_phoneme"]["width_mm"],
+                    height_mm=PANEL_DIMS["figure2"]["by_phoneme"]["height_mm"], save=True):
 
-    linewidth = 0.67              # ~= 0.5 pt for Illustrator
-    jitter = 1.0                 # max allowed
-    pointpos = -1.30             # visual jitter extension
-    boxgap = 0.25                # thicker boxes
-    boxgroupgap = 0.40
+    _box  = PLOT_STYLE["box"]
+    _font = PLOT_STYLE["font"]
+
+    linewidth    = 0.67   # ~= 0.5 pt for Illustrator
 
     phoneme_order = []
     for a in ARTIC_ORDER:
@@ -310,11 +509,12 @@ def plotly_phonemes(df, save=True):
     # TRACES
     # ------------------------
     fig.update_traces(
-        marker=dict(size=1.6, opacity=0.45,
-                    line=dict(width=0.15, color="silver")),
-        jitter=jitter,
-        pointpos=pointpos,
-        boxmean=False,          
+        marker=dict(size=_box["marker_size"], opacity=_box["marker_opacity"],
+                    line=dict(width=_box["line_width"], color="white")),
+        line=dict(width=_box["line_width"]),
+        jitter=_box["jitter"],
+        pointpos=_box["pointpos"],
+        boxmean=False,
         opacity=1.0
     )
 
@@ -333,8 +533,8 @@ def plotly_phonemes(df, save=True):
         linecolor="black",
         linewidth=linewidth,
         ticks="outside",
-        tickfont=dict(size=5, family="Arial"),
-        title_font=dict(size=6, family="Arial")
+        tickfont=dict(size=_font["size_tick"], family=_font["family"]),
+        title_font=dict(size=_font["size_label"], family=_font["family"])
     )
 
     # ------------------------
@@ -342,34 +542,33 @@ def plotly_phonemes(df, save=True):
     # ------------------------
     fig.update_layout(
         title="Phoneme Time Differences: Manual vs. Automated",
-        title_font=dict(size=7, family="Arial", color="black"),
-        font=dict(family="Arial", size=6, color="black"),
+        title_font=dict(size=_font["size_title"], family=_font["family"], color="black"),
+        font=dict(family=_font["family"], size=_font["size_label"], color="black"),
         yaxis_title="Time (s)",
 
         plot_bgcolor="white",
         paper_bgcolor="white",
 
-        boxgap=boxgap,
-        boxgroupgap=boxgroupgap,
+        boxgap=_box["boxgap_hue"],
+        boxgroupgap=_box["boxgap_hue"],
 
-        margin=dict(t=40, b=45, l=50, r=10),
+        margin=dict(t=40, b=45, l=50, r=60),
 
         legend=dict(
-            orientation="h",
-            y=-0.20,
-            x=0.5,
-            xanchor="center",
-            font=dict(size=6)
+            orientation="v",
+            y=1.0,
+            x=1.02,
+            xanchor="left",
+            yanchor="top",
+            font=dict(size=_font["size_tick"]),
+            tracegroupgap=2,
         )
     )
 
     if save:
-        fig.write_image(
-            "../figures/figure2/fig1_by_phoneme.svg",
-            format="svg"
-        )
+        save_svg(fig, "../figures/figure2/fig1_by_phoneme.svg", width_mm, height_mm)
 
-    fig.show()
+    return fig
 
 
 
@@ -438,7 +637,7 @@ def get_position_index(position: str) -> int:
         raise ValueError(f"Invalid position: {position}")
     return position_map[position]
 
-def getCoolData(patient_name, position, method, pkl_path, intraop_path):
+def load_hg_traces(patient_name, position, method, pkl_path, intraop_path):
     
     patient_data = fetch_patient_data(pkl_path=pkl_path, intra_op_data_path=intraop_path)
     timevec = np.arange(-0.5, 0.5, 1/200)
@@ -668,7 +867,9 @@ def run_tsneShuffledY(Xys_df, perp, pcacomp, numrun):
     return tsne_df
 
 
-def run_plottly(tsne_df, huere):
+def plot_tsne_scatter(tsne_df, huere,
+                width_mm=PANEL_DIMS["figure3"]["tsne_scatter"]["width_mm"],
+                height_mm=PANEL_DIMS["figure3"]["tsne_scatter"]["height_mm"]):
 
     pio.templates.default = "none"
 
@@ -749,7 +950,7 @@ def run_plottly(tsne_df, huere):
         out_path = os.path.join(
             out_dir,
             f"TSNE on {huere} Silscore {silscore:.2f} {patient} {method} {numrun}.svg")
-        fig.write_image(out_path, format="svg", scale=3)
+        save_svg(fig, out_path, width_mm, height_mm)
 
 
     return fig
